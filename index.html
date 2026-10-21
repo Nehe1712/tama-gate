@@ -39,6 +39,16 @@ summary{font-weight:700;cursor:pointer}
 .card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border-radius:18px;padding:22px;width:300px;text-align:center;box-shadow:0 8px 30px #0003}
 .card h2{font-size:26px;margin:0 0 10px}
 .card p{margin:6px 0}
+.slot{background:#fff;border-radius:12px;padding:8px 10px;margin:6px 0;box-shadow:0 1px 4px #0001}
+.slot .lbl{font-size:12px;font-weight:700;color:#475569;margin-bottom:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:flex;align-items:center;gap:6px;background:#f1f5f9;color:#1e293b;box-shadow:none;border:2px solid transparent;padding:5px 8px;font-size:12px;font-weight:600;text-align:left;border-radius:10px}
+.chip:active{transform:none;box-shadow:none}
+.chip.on{border-color:#f97316;background:#fff7ed}
+.chip .ci{font-size:18px}
+.chip small{display:block;font-weight:400;color:#64748b;font-size:11px}
+.r1{color:#64748b}.r2{color:#2563eb}.r3{color:#c026d3}
+#rDrops{margin:8px 0;font-size:14px;line-height:1.7}
 @media (max-width:640px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -57,7 +67,9 @@ summary{font-weight:700;cursor:pointer}
     <div class="row"><span class="pill">🪙 <b id="bCoins">0</b></span><span class="pill">ステージ <b id="bStage">1</b></span>
       <button class="go" id="goBtn">出撃</button></div>
     <div class="note" id="enemyInfo" style="margin-top:6px"></div>
-    <h2>装備を整える</h2>
+    <h2>装備 <span style="font-size:12px;color:#667;font-weight:400">— 敵が落とすドロップ品。クリックで付け替え（図鑑 <span id="dex"></span>）</span></h2>
+    <div id="equip"></div>
+    <h2>強化 <span style="font-size:12px;color:#667;font-weight:400">— コインで買う</span></h2>
     <div class="grid" id="shop"></div>
     <details><summary>遊び方</summary>
       <ol style="padding-left:20px;margin:4px 0">
@@ -67,6 +79,7 @@ summary{font-weight:700;cursor:pointer}
         <li>茶色の壁は玉をぶつけると壊れる（玉は減る）。壁の下には大きいゲートが隠れている。</li>
         <li>一番下に落ちた玉は左の管で上に吸い上げられ、城の大砲から敵へ自動で撃ち出される。</li>
         <li>敵が城にたどり着くと城がダメージ。全部の敵を倒せばクリア。余った玉はコインになる。</li>
+        <li>敵はたまに📦ドロップ品を落とす（ボスは必ず）。玉・発射台・追加装備があって、それぞれ性能が違う。拠点で付け替えよう。</li>
       </ol>
     </details>
     <div class="center"><button class="sub small" id="resetBtn">データを消して最初から</button></div>
@@ -77,6 +90,7 @@ summary{font-weight:700;cursor:pointer}
       <h2 id="rTitle">クリア！</h2>
       <p id="rText"></p>
       <p style="font-size:24px;font-weight:700">🪙 +<span id="rCoins">0</span></p>
+      <div id="rDrops"></div>
       <button class="go" id="rBtn">拠点へ戻る</button>
     </div>
   </div>
@@ -95,15 +109,65 @@ let scale=1;
 const SAVE_KEY='tamagate_v2';
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-function load(){let d=null;try{d=JSON.parse(lsGet(SAVE_KEY))}catch(e){}return Object.assign({stage:1,coins:0,best:1,lv:{}},d||{})}
+function freshSave(){return{stage:1,coins:0,best:1,lv:{},inv:['ball_normal','la_normal'],eq:{ball:'ball_normal',launcher:'la_normal',acc:[]}}}
+function load(){let d=null;try{d=JSON.parse(lsGet(SAVE_KEY))}catch(e){}return Object.assign(freshSave(),d||{})}
 let save=load();
 function persist(){lsSet(SAVE_KEY,JSON.stringify(save))}
 
 // ---------- 装備 ----------
 const lv=id=>save.lv[id]||0;
-function stats(){return{
-  feed:3+0.6*lv('feed'),atk:1+lv('atk'),fire:8+3*lv('fire'),castle:10+5*lv('castle'),
-  tramp:2+lv('tramp'),tlen:80*(1+0.15*lv('twide')),gates:lv('gate'),coinMul:1+0.25*lv('coin'),pierce:0.1*lv('pierce')}}
+// ドロップ品。slot: ball=玉 / launcher=発射台 / acc=追加装備（2枠）。rare: 1〜3（★の数）
+const ITEMS={
+  ball_normal:{slot:'ball',ic:'🔴',name:'ふつうの玉',rare:0,desc:'特徴なし'},
+  ball_iron:{slot:'ball',ic:'⚫',name:'鉄球',rare:1,desc:'ダメージ×2・補給×0.7'},
+  ball_ice:{slot:'ball',ic:'🧊',name:'氷の玉',rare:1,desc:'当たった敵の足が2秒遅くなる'},
+  ball_bouncy:{slot:'ball',ic:'🟣',name:'スーパーボール',rare:1,desc:'よく跳ねる・壁へのダメージ×2'},
+  ball_fire:{slot:'ball',ic:'🔥',name:'炎の玉',rare:2,desc:'当たると周りの敵にも50%ダメージ'},
+  ball_gold:{slot:'ball',ic:'🟡',name:'金の玉',rare:2,desc:'余った玉のコイン×2・ダメージ×0.7'},
+  ball_thunder:{slot:'ball',ic:'⚡',name:'雷の玉',rare:3,desc:'近くの敵2体に電撃が連鎖（60%）'},
+  la_normal:{slot:'launcher',ic:'🔻',name:'ふつうの発射台',rare:0,desc:'特徴なし'},
+  la_twin:{slot:'launcher',ic:'⏬',name:'2連発射台',rare:1,desc:'穴が2つ・補給×1.2'},
+  la_shot:{slot:'launcher',ic:'💦',name:'散弾発射台',rare:1,desc:'玉が左右に広く散る・補給×1.3'},
+  la_auto:{slot:'launcher',ic:'🔄',name:'往復発射台',rare:2,desc:'勝手に左右へ動く・補給×1.3'},
+  la_rapid:{slot:'launcher',ic:'⏩',name:'速射発射台',rare:2,desc:'補給×1.7・ダメージ×0.8'},
+  la_drill:{slot:'launcher',ic:'⬇️',name:'ドリル発射台',rare:3,desc:'真下へ勢いよく撃ち出す・補給×1.5'},
+  ac_shield:{slot:'acc',ic:'🛡️',name:'城の盾',rare:1,desc:'城が受けるダメージ半分'},
+  ac_charm:{slot:'acc',ic:'🍀',name:'幸運のお守り',rare:1,desc:'ドロップ率×2'},
+  ac_hammer:{slot:'acc',ic:'🔨',name:'破壊ハンマー',rare:1,desc:'壁へのダメージ×3'},
+  ac_booster:{slot:'acc',ic:'🚀',name:'管ブースター',rare:2,desc:'管が2倍速・連射+30%'},
+  ac_spring:{slot:'acc',ic:'🌀',name:'強力バネ',rare:2,desc:'トランポリン幅+30%・跳ね+20%'},
+  ac_gem:{slot:'acc',ic:'💎',name:'宝石',rare:2,desc:'コイン+50%'},
+  ac_gate:{slot:'acc',ic:'✨',name:'ゲート強化石',rare:3,desc:'×2ゲートが全部×3になる'},
+};
+const SLOT_NAME={ball:'玉',launcher:'発射台',acc:'追加装備（2つまで）'};
+const stars=r=>'★'.repeat(r);
+function stats(){
+  const eq=save.eq,b=eq.ball,l=eq.launcher,has=id=>eq.acc.includes(id);
+  const s={
+    feed:3+0.6*lv('feed'),atk:1+lv('atk'),fire:8+3*lv('fire'),castle:10+5*lv('castle'),
+    tramp:2+lv('tramp'),tlen:80*(1+0.15*lv('twide')),gates:lv('gate'),coinMul:1+0.25*lv('coin'),pierce:0.1*lv('pierce'),
+    ball:b,launcher:l,dmgMul:1,wallMul:1,bounceAdd:0,tbMul:1,ballCoin:1,dropMul:1,pipeT:0.9,shield:has('ac_shield'),gateBoost:has('ac_gate')};
+  if(b==='ball_iron'){s.dmgMul*=2;s.feed*=0.7}
+  if(b==='ball_bouncy'){s.bounceAdd=0.3;s.wallMul*=2}
+  if(b==='ball_gold'){s.ballCoin=2;s.dmgMul*=0.7}
+  s.feed*={la_twin:1.2,la_shot:1.3,la_auto:1.3,la_rapid:1.7,la_drill:1.5}[l]||1;
+  if(l==='la_rapid')s.dmgMul*=0.8;
+  if(has('ac_charm'))s.dropMul=2;
+  if(has('ac_hammer'))s.wallMul*=3;
+  if(has('ac_booster')){s.pipeT=0.45;s.fire*=1.3}
+  if(has('ac_spring')){s.tlen*=1.3;s.tbMul=1.2}
+  if(has('ac_gem'))s.coinMul+=0.5;
+  return s;
+}
+function rollDrop(type,stage){
+  const chance={norm:0.03,fast:0.03,tank:0.12,boss:1}[type]*(type==='boss'?1:st.dropMul);
+  if(Math.random()>=chance)return null;
+  const w=type==='boss'?{1:0,2:60,3:40}:{1:65,2:28,3:stage>=4?7:0};
+  let r=Math.random()*(w[1]+w[2]+w[3]),rare=3;
+  if(r<w[1])rare=1;else if(r<w[1]+w[2])rare=2;
+  const pool=Object.keys(ITEMS).filter(id=>ITEMS[id].rare===rare);
+  return pool[Math.floor(Math.random()*pool.length)];
+}
 const SHOP=[
   {id:'feed',ic:'⚪',name:'玉の補給',base:30,grow:1.55,max:40,desc:l=>`1秒に落ちる玉 ${(3+0.6*l).toFixed(1)} → ${(3.6+0.6*l).toFixed(1)}個`},
   {id:'atk',ic:'⚔️',name:'玉の攻撃力',base:60,grow:2,max:30,desc:l=>`玉1個のダメージ ${1+l} → ${2+l}`},
@@ -193,7 +257,8 @@ function buildGrid(m){
 // ---------- 状態 ----------
 let mode='base',M=null,tramps=[],balls=[],spawn=[],pipe=[],shots=[],enemies=[],popups=[];
 let launchX=520,feedT=0,tank=0,fireT=0,castle={hp:10,max:10,shake:0},time=0,spawnIdx=0,kills=0;
-let speed=1,acc=0,st=stats(),lastLayout=null,cannonAng=0;
+let speed=1,acc=0,st=stats(),lastLayout=null,cannonAng=0,runDrops=[],zaps=[],feedAlt=0;
+const ballDmg=()=>st.atk*st.dmgMul;
 
 function trampEnds(t){const a=ANG[t.ai],h=st.tlen/2,c=Math.cos(a)*h,s=Math.sin(a)*h;return{ax:t.x-c,ay:t.y-s,bx:t.x+c,by:t.y+s}}
 function setGateRect(g){g.x1=g.x-g.w/2;g.x2=g.x+g.w/2}
@@ -210,9 +275,9 @@ function startPlan(){
     const mg=M.gates.filter(g=>g.movable);
     lastLayout.gates.forEach((p,i)=>{if(mg[i]){mg[i].x=p.x;mg[i].y=p.y;setGateRect(mg[i])}});
   }else launchX=520;
-  M.gates.forEach((g,i)=>{g.idx=i;g.flash=0});
+  M.gates.forEach((g,i)=>{g.idx=i;g.flash=0;if(st.gateBoost&&g.k===2)g.k=3});
   buildGrid(M);
-  balls=[];pipe=[];shots=[];enemies=[];popups=[];
+  balls=[];pipe=[];shots=[];enemies=[];popups=[];runDrops=[];zaps=[];
   tank=0;time=0;spawnIdx=0;kills=0;feedT=0;fireT=0;
   castle={hp:st.castle,max:st.castle,shake:0};
   mode='plan';
@@ -230,7 +295,7 @@ function finishRun(win){
   let coins;
   if(win){
     let left=tank;for(const b of balls)left+=b.n;for(const p of pipe)left+=p.n;
-    coins=Math.round(left*0.15*st.coinMul)+kills+5*save.stage;
+    coins=Math.round(left*0.15*st.coinMul*st.ballCoin)+kills+5*save.stage;
     $('rTitle').textContent=M.boss?'ボス撃破！':'ステージクリア！';
     $('rText').textContent=`倒した敵 ${kills}体・余った玉 ${fmt(left)}個`;
     save.stage++;save.best=Math.max(save.best,save.stage);
@@ -239,6 +304,14 @@ function finishRun(win){
     $('rTitle').textContent='城が落ちた…';
     $('rText').textContent=`倒した敵 ${kills}体。装備を整えて再挑戦！`;
   }
+  // ドロップ品は負けても持ち帰れる。持っている物が出たらコインに換える
+  const lines=[];
+  for(const id of runDrops){
+    const it=ITEMS[id];
+    if(save.inv.includes(id)){const c=20*it.rare+5*save.stage;coins+=c;lines.push(`${it.ic} ${it.name}（2つ目なので 🪙${c} に）`)}
+    else{save.inv.push(id);lines.push(`<b class="r${it.rare}">${it.ic} ${it.name} ${stars(it.rare)}</b> NEW!`)}
+  }
+  $('rDrops').innerHTML=lines.length?'📦 ドロップ品<br>'+lines.join('<br>'):'';
   save.coins+=coins;persist();
   $('rCoins').textContent=fmt(coins);
   $('result').classList.remove('hidden');$('ui').classList.add('hidden');
@@ -252,7 +325,8 @@ function renderBase(){
   $('bCoins').textContent=fmt(save.coins);$('bStage').textContent=save.stage;
   $('goBtn').textContent=`ステージ ${save.stage} へ出撃`;
   const m=genStage(save.stage);
-  $('enemyInfo').textContent=`${m.boss?'👑 ボス面　':''}敵 ${m.spawns.length}体・1体のHP ${fmt(enemyHp(save.stage))}　（最高到達 ${save.best}面）`;
+  $('enemyInfo').textContent=`${m.boss?'👑 ボス面（ボスは必ずドロップ）　':''}敵 ${m.spawns.length}体・1体のHP ${fmt(enemyHp(save.stage))}　（最高到達 ${save.best}面）`;
+  renderEquip();
   const sh=$('shop');sh.innerHTML='';
   for(const it of SHOP){
     const l=lv(it.id),maxed=l>=it.max,c=cost(it);
@@ -263,6 +337,30 @@ function renderBase(){
     b.disabled=maxed||save.coins<c;
     b.onclick=()=>{if(save.coins<c||maxed)return;save.coins-=c;save.lv[it.id]=l+1;persist();renderBase()};
     d.appendChild(b);sh.appendChild(d);
+  }
+}
+function renderEquip(){
+  const box=$('equip');box.innerHTML='';
+  $('dex').textContent=`${save.inv.length}/${Object.keys(ITEMS).length}`;
+  for(const slot of ['ball','launcher','acc']){
+    const d=document.createElement('div');d.className='slot';
+    d.innerHTML=`<div class="lbl">${SLOT_NAME[slot]}</div>`;
+    const chips=document.createElement('div');chips.className='chips';
+    for(const id of Object.keys(ITEMS)){
+      const it=ITEMS[id];if(it.slot!==slot||!save.inv.includes(id))continue;
+      const on=slot==='acc'?save.eq.acc.includes(id):save.eq[slot]===id;
+      const b=document.createElement('button');b.className='chip'+(on?' on':'');
+      b.innerHTML=`<span class="ci">${it.ic}</span><span>${it.name} <span class="r${it.rare}">${stars(it.rare)}</span><small>${it.desc}</small></span>`;
+      b.onclick=()=>{
+        if(slot!=='acc')save.eq[slot]=id;
+        else if(on)save.eq.acc=save.eq.acc.filter(x=>x!==id);
+        else{save.eq.acc.push(id);if(save.eq.acc.length>2)save.eq.acc.shift()}
+        persist();renderEquip();
+      };
+      chips.appendChild(b);
+    }
+    if(!chips.children.length)chips.innerHTML='<span style="font-size:12px;color:#94a3b8">まだ持っていない。敵を倒すとたまに落とす</span>';
+    d.appendChild(chips);box.appendChild(d);
   }
 }
 
@@ -278,7 +376,7 @@ function collSeg(b,ax,ay,bx,by,th){
   if(d<1e-4){nx=-dy;ny=dx;d=Math.hypot(nx,ny)||1;if(ny>0){nx=-nx;ny=-ny}}
   nx/=d;ny/=d;b.x=px+nx*rr;b.y=py+ny*rr;hx=nx;hy=ny;return true;
 }
-function bounce(b,e){const vn=b.vx*hx+b.vy*hy;if(vn<0){b.vx-=(1+e)*vn*hx;b.vy-=(1+e)*vn*hy;b.vx*=0.99;b.vy*=0.99}}
+function bounce(b,e){e+=st.bounceAdd;const vn=b.vx*hx+b.vy*hy;if(vn<0){b.vx-=(1+e)*vn*hx;b.vy-=(1+e)*vn*hy;b.vx*=0.99;b.vy*=0.99}}
 const hasBit=(b,i)=>i<30?(b.p1>>i)&1:(b.p2>>(i-30))&1;
 function setBit(b,i){if(i<30)b.p1|=1<<i;else b.p2|=1<<(i-30)}
 function pop(x,y,text,color,size){if(popups.length<80)popups.push({x,y,text,color,size:size||14,t:0.8})}
@@ -293,9 +391,9 @@ function applyGate(b,g){
 }
 function hitWall(b,w){
   w.flash=0.15;
-  const need=Math.ceil(w.hp/st.atk);
+  const per=st.atk*st.wallMul,need=Math.ceil(w.hp/per);
   if(b.n>need){b.n-=need;w.hp=0}
-  else{w.hp-=b.n*st.atk;if(Math.random()>=st.pierce)b.dead=true}
+  else{w.hp-=b.n*per;if(Math.random()>=st.pierce)b.dead=true}
   if(w.hp<=0){w.hp=0;pop((w.x1+w.x2)/2,w.y,'ドカン！','#c2410c',20)}
 }
 function toPipe(b){b.dead=true;pipe.push({n:b.n,t:0})}
@@ -319,7 +417,7 @@ function stepBalls(dt){
     if(b.dead)continue;
     for(const t of tramps){
       const e=trampEnds(t);
-      if(collSeg(b,e.ax,e.ay,e.bx,e.by,4)){const vn=b.vx*hx+b.vy*hy,P=TB*Math.pow(0.7,b.tb);if(vn<P){b.vx+=(P-vn)*hx;b.vy+=(P-vn)*hy;b.tb++}else bounce(b,0.3);t.flash=0.15}
+      if(collSeg(b,e.ax,e.ay,e.bx,e.by,4)){const vn=b.vx*hx+b.vy*hy,P=TB*st.tbMul*Math.pow(0.7,b.tb);if(vn<P){b.vx+=(P-vn)*hx;b.vy+=(P-vn)*hy;b.tb++}else bounce(b,0.3);t.flash=0.15}
     }
     for(const g of M.gates){
       if(py<g.y&&b.y>=g.y&&b.x>=g.x1&&b.x<=g.x2&&!hasBit(b,g.idx)){applyGate(b,g);if(b.dead)break}
@@ -337,6 +435,27 @@ function pickTarget(){
   for(const e of enemies)if(e.hp-e.pending>0&&(!best||e.x<best.x))best=e;
   return best;
 }
+function damage(e,dmg){
+  if(e.dead)return;
+  e.hp-=dmg;e.hit=0.1;
+  if(e.hp>0)return;
+  e.dead=true;kills++;
+  pop(e.x,e.y-e.r,e.type==='boss'?'ボス撃破！':'撃破','#16a34a',e.type==='boss'?26:14);
+  const id=rollDrop(e.type,M.stage);
+  if(id){runDrops.push(id);pop(e.x,e.y-e.r-22,'📦 '+ITEMS[id].name,'#c026d3',16)}
+}
+// 玉の種類ごとの追加効果
+function ballEffect(tg,dmg){
+  const b=st.ball;
+  if(b==='ball_ice')tg.frozen=2;
+  else if(b==='ball_fire'){
+    for(const e of enemies)if(e!==tg&&!e.dead&&Math.hypot(e.x-tg.x,e.y-tg.y)<60)damage(e,dmg*0.5);
+    zaps.push({type:'fire',x:tg.x,y:tg.y,t:0.2});
+  }else if(b==='ball_thunder'){
+    const near=enemies.filter(e=>e!==tg&&!e.dead).sort((a,c)=>Math.hypot(a.x-tg.x,a.y-tg.y)-Math.hypot(c.x-tg.x,c.y-tg.y)).slice(0,2);
+    for(const e of near)if(Math.hypot(e.x-tg.x,e.y-tg.y)<180){zaps.push({type:'bolt',x:tg.x,y:tg.y,x2:e.x,y2:e.y,t:0.15});damage(e,dmg*0.6)}
+  }
+}
 function stepBattle(dt){
   time+=dt;
   while(spawnIdx<M.spawns.length&&M.spawns[spawnIdx].t<=time){
@@ -344,33 +463,48 @@ function stepBattle(dt){
     enemies.push({type:s.type,x:W+s.r,y:GROUND-s.r-rand(0,26),hp:s.hp,max:s.hp,spd:s.spd,dmg:s.dmg,r:s.r,col:s.col,pending:0,hit:0,ph:Math.random()*6});
   }
   for(const e of enemies){
-    e.x-=e.spd*dt;e.ph+=dt*8;if(e.hit>0)e.hit-=dt;
-    if(e.x-e.r<=CASTLE_X){e.dead=true;castle.hp=Math.max(0,castle.hp-e.dmg);castle.shake=0.3;pop(CASTLE_X-30,120,'-'+e.dmg,'#dc2626',20)}
+    if(e.frozen>0)e.frozen-=dt;
+    e.x-=e.spd*(e.frozen>0?0.45:1)*dt;e.ph+=dt*8;if(e.hit>0)e.hit-=dt;
+    if(e.x-e.r<=CASTLE_X){
+      const d=st.shield?Math.ceil(e.dmg/2):e.dmg;
+      e.dead=true;castle.hp=Math.max(0,castle.hp-d);castle.shake=0.3;pop(CASTLE_X-30,120,'-'+d,'#dc2626',20);
+    }
   }
+  for(const z of zaps)z.t-=dt;
+  zaps=zaps.filter(z=>z.t>0);
   // 管
-  for(const p of pipe)p.t+=dt/0.9;
+  for(const p of pipe)p.t+=dt/st.pipeT;
   while(pipe.length&&pipe[0].t>=1)tank+=pipe.shift().n;
   // 大砲
   fireT-=dt;
   while(fireT<=0&&tank>0){
     const tg=pickTarget();if(!tg){fireT=0;break}
     const n=Math.min(tank,Math.max(1,Math.ceil(tank/40)));
-    tank-=n;tg.pending+=n*st.atk;
+    tank-=n;tg.pending+=n*ballDmg();
     shots.push({x:CANNON.x,y:CANNON.y,n,tg});
     cannonAng=Math.atan2(tg.y-CANNON.y,tg.x-CANNON.x);
     fireT+=1/st.fire;
   }
   for(const s of shots){
     let tg=s.tg;
-    if(tg.dead){tg=pickTarget();if(!tg){s.dead=true;tank+=s.n;continue}tg.pending+=s.n*st.atk;s.tg=tg}
+    if(tg.dead){tg=pickTarget();if(!tg){s.dead=true;tank+=s.n;continue}tg.pending+=s.n*ballDmg();s.tg=tg}
     const dx=tg.x-s.x,dy=tg.y-s.y,d=Math.hypot(dx,dy),v=900*dt;
     if(d<=v+tg.r*0.5){
-      s.dead=true;const dmg=s.n*st.atk;tg.pending-=dmg;tg.hp-=dmg;tg.hit=0.1;
-      if(tg.hp<=0&&!tg.dead){tg.dead=true;kills++;pop(tg.x,tg.y-tg.r,tg.type==='boss'?'ボス撃破！':'撃破','#16a34a',tg.type==='boss'?26:14)}
+      s.dead=true;const dmg=s.n*ballDmg();tg.pending-=dmg;
+      damage(tg,dmg);ballEffect(tg,dmg);
     }else{s.x+=dx/d*v;s.y+=dy/d*v}
   }
   shots=shots.filter(s=>!s.dead);
   enemies=enemies.filter(e=>!e.dead);
+}
+// 発射台の種類ごとの玉の出し方
+function launchHoles(){return st.launcher==='la_twin'?[launchX-60,launchX+60]:[launchX]}
+function feedBall(){
+  const L=st.launcher,holes=launchHoles(),x=holes[feedAlt++%holes.length];
+  let vx=rand(-40,40),vy=60;
+  if(L==='la_shot')vx=rand(-200,200);
+  if(L==='la_drill'){vx=rand(-10,10);vy=520}
+  balls.push({x:clamp(x+rand(-5,5),MX0+8,W-8),y:268,vx,vy,n:1,p1:0,p2:0,age:0,slow:0,tb:0,dead:false});
 }
 function update(dt){
   for(const g of M.gates)if(g.flash>0)g.flash-=dt;
@@ -384,7 +518,8 @@ function update(dt){
   while(acc>=1/60&&iter<12){
     const h=1/60;
     feedT-=h;
-    while(feedT<=0){balls.push({x:launchX+rand(-5,5),y:268,vx:rand(-40,40),vy:60,n:1,p1:0,p2:0,age:0,slow:0,tb:0,dead:false});feedT+=1/st.feed}
+    if(st.launcher==='la_auto')launchX=MX0+60+(Math.sin(time*0.7)*0.5+0.5)*(W-MX0-120);
+    while(feedT<=0){feedBall();feedT+=1/st.feed}
     for(let s=0;s<3;s++)stepBalls(h/3);
     stepBattle(h);
     acc-=h;iter++;
@@ -420,9 +555,10 @@ function draw(){
   ctx.fillStyle='#6fa33a';ctx.fillRect(0,GROUND,W,4);
   drawCastle();
   for(const e of enemies)drawEnemy(e);
-  ctx.fillStyle='#ef4444';ctx.beginPath();
+  ctx.fillStyle=ballCol();ctx.beginPath();
   for(const s of shots){const r=BR+Math.min(5,Math.log2(s.n));ctx.moveTo(s.x+r,s.y);ctx.arc(s.x,s.y,r,0,7)}
   ctx.fill();
+  drawZaps();
   // 装置
   ctx.fillStyle='#f8fafc';ctx.fillRect(MX0,MTOP,W-MX0,H-MTOP);
   ctx.fillStyle='#e2e8f0';ctx.beginPath();ctx.moveTo(W,560);ctx.lineTo(MX0,592);ctx.lineTo(MX0,H);ctx.lineTo(W,H);ctx.fill();
@@ -455,10 +591,10 @@ function draw(){
     ctx.fillStyle='#ea580c';ctx.beginPath();ctx.arc(t.x,t.y,4,0,7);ctx.fill();
   }
   // 発射台
-  ctx.fillStyle='#334155';ctx.beginPath();ctx.moveTo(launchX-24,MTOP);ctx.lineTo(launchX+24,MTOP);ctx.lineTo(launchX+8,MTOP+24);ctx.lineTo(launchX-8,MTOP+24);ctx.closePath();ctx.fill();
-  if(mode==='plan'){label('◀',launchX-38,MTOP+12,13,'#94a3b8');label('▶',launchX+38,MTOP+12,13,'#94a3b8')}
+  for(const hx0 of launchHoles()){ctx.fillStyle=st.launcher==='la_normal'?'#334155':'#7c3aed';ctx.beginPath();ctx.moveTo(hx0-24,MTOP);ctx.lineTo(hx0+24,MTOP);ctx.lineTo(hx0+8,MTOP+24);ctx.lineTo(hx0-8,MTOP+24);ctx.closePath();ctx.fill()}
+  if(mode==='plan'&&st.launcher!=='la_auto'){label('◀',launchX-38,MTOP+12,13,'#94a3b8');label('▶',launchX+38,MTOP+12,13,'#94a3b8')}
   // 玉
-  ctx.fillStyle='#ef4444';ctx.beginPath();
+  ctx.fillStyle=ballCol();ctx.beginPath();
   for(const b of balls){if(b.n>1)continue;ctx.moveTo(b.x+BR,b.y);ctx.arc(b.x,b.y,BR,0,7)}
   ctx.fill();
   ctx.fillStyle='#f59e0b';ctx.beginPath();
@@ -480,7 +616,7 @@ function drawPipe(){
   ctx.lineCap='round';ctx.strokeStyle='#94a3b8';ctx.lineWidth=26;
   ctx.beginPath();ctx.moveTo(MX0+6,592);ctx.lineTo(40,592);ctx.lineTo(40,CANNON.y);ctx.lineTo(CANNON.x-8,CANNON.y);ctx.stroke();
   ctx.strokeStyle='#dbe4ee';ctx.lineWidth=16;ctx.stroke();
-  ctx.fillStyle='#ef4444';ctx.beginPath();
+  ctx.fillStyle=ballCol();ctx.beginPath();
   const L1=MX0+6-40,L2=592-CANNON.y;
   for(const p of pipe){
     let d=p.t*(L1+L2),x,y;
@@ -509,7 +645,7 @@ function drawCastle(){
 }
 function drawEnemy(e){
   const bob=Math.sin(e.ph)*2,x=e.x,y=e.y+bob,r=e.r;
-  ctx.fillStyle=e.hit>0?'#fff':e.col;
+  ctx.fillStyle=e.hit>0?'#fff':e.frozen>0?'#7dd3fc':e.col;
   ctx.beginPath();ctx.ellipse(x,y,r,r*0.85,0,0,7);ctx.fill();
   ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x-r*0.35,y-r*0.15,r*0.22,0,7);ctx.arc(x+r*0.15,y-r*0.15,r*0.22,0,7);ctx.fill();
   ctx.fillStyle='#111';ctx.beginPath();ctx.arc(x-r*0.42,y-r*0.12,r*0.1,0,7);ctx.arc(x+r*0.08,y-r*0.12,r*0.1,0,7);ctx.fill();
@@ -518,8 +654,20 @@ function drawEnemy(e){
   ctx.fillStyle='#0003';ctx.fillRect(x-bw/2,y-r-10,bw,4);
   ctx.fillStyle='#ef4444';ctx.fillRect(x-bw/2,y-r-10,bw*Math.max(0,e.hp)/e.max,4);
 }
+function ballCol(){return{ball_iron:'#374151',ball_ice:'#38bdf8',ball_bouncy:'#a855f7',ball_fire:'#f97316',ball_gold:'#eab308',ball_thunder:'#facc15'}[st.ball]||'#ef4444'}
+function drawZaps(){
+  for(const z of zaps){
+    ctx.globalAlpha=Math.min(1,z.t*6);
+    if(z.type==='fire'){ctx.fillStyle='#fb923c';ctx.beginPath();ctx.arc(z.x,z.y,60*(1-z.t*3),0,7);ctx.fill()}
+    else{ctx.strokeStyle='#facc15';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(z.x,z.y);ctx.lineTo((z.x+z.x2)/2+rand(-10,10),(z.y+z.y2)/2+rand(-10,10));ctx.lineTo(z.x2,z.y2);ctx.stroke()}
+  }
+  ctx.globalAlpha=1;
+}
 function drawHud(){
   const left=M.spawns.length-spawnIdx+enemies.length;
+  const eq=[st.ball,st.launcher,...save.eq.acc].map(id=>ITEMS[id].ic).join(' ');
+  ctx.font='600 14px system-ui,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#1e293b';
+  ctx.fillText('装備 '+eq+(runDrops.length?'　📦×'+runDrops.length:''),420,16);
   ctx.font='800 15px system-ui,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#1e293b';
   ctx.fillText(`${M.boss?'👑 ':''}ステージ ${M.stage}　敵 残り ${left}`,150,16);
 }
@@ -531,7 +679,7 @@ function distSeg(px,py,e){const dx=e.bx-e.ax,dy=e.by-e.ay;let t=((px-e.ax)*dx+(p
 function grabAt(p){
   for(const t of tramps)if(distSeg(p.x,p.y,trampEnds(t))<18)return{type:'tramp',o:t};
   for(const g of M.gates)if(g.movable&&p.x>g.x1-6&&p.x<g.x2+6&&Math.abs(p.y-g.y)<18)return{type:'gate',o:g};
-  if(Math.abs(p.x-launchX)<45&&p.y>MTOP-6&&p.y<MTOP+34)return{type:'launch'};
+  if(st.launcher!=='la_auto'&&Math.abs(p.x-launchX)<45&&p.y>MTOP-6&&p.y<MTOP+34)return{type:'launch'};
   return null;
 }
 cv.addEventListener('pointerdown',e=>{
@@ -563,7 +711,7 @@ $('startBtn').onclick=startRun;
 $('backBtn').onclick=showBase;
 $('rBtn').onclick=showBase;
 $('spdBtn').onclick=()=>{speed=speed===1?2:speed===2?3:1;$('spdBtn').textContent='速さ ×'+speed};
-$('resetBtn').onclick=()=>{if(confirm('コイン・装備・ステージを全部消して最初からにしますか？')){save={stage:1,coins:0,best:1,lv:{}};persist();lastLayout=null;renderBase()}};
+$('resetBtn').onclick=()=>{if(confirm('コイン・装備・ステージを全部消して最初からにしますか？')){save=freshSave();persist();lastLayout=null;renderBase()}};
 window.addEventListener('keydown',e=>{if(e.code==='Space'&&mode==='plan'){e.preventDefault();startRun()}});
 
 window.addEventListener('resize',resize);
