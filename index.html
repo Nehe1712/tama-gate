@@ -57,19 +57,19 @@ summary{font-weight:700;cursor:pointer}
   <canvas id="cv"></canvas>
   <div id="ui" class="hidden">
     <button class="sub" id="spdBtn">速さ ×1</button>
-    <button class="sub" id="backBtn">拠点へ</button>
+    <button class="sub" id="backBtn">撤退</button>
     <button class="go" id="startBtn">開始！</button>
   </div>
 
   <div id="base" class="panel"><div class="inner">
     <h1>タマゲート</h1>
     <p class="tag">装置で玉を増やして、管で吸い上げ、押し寄せる敵を撃ちまくれ</p>
-    <div class="row"><span class="pill">🪙 <b id="bCoins">0</b></span><span class="pill">ステージ <b id="bStage">1</b></span>
+    <div class="row"><span class="pill">🪙 <b id="bCoins">0</b></span><span class="pill">最高到達 <b id="bStage">1</b>面</span>
       <button class="go" id="goBtn">出撃</button></div>
     <div class="note" id="enemyInfo" style="margin-top:6px"></div>
     <h2>装備 <span style="font-size:12px;color:#667;font-weight:400">— 敵が落とすドロップ品。クリックで付け替え（図鑑 <span id="dex"></span>）</span></h2>
     <div id="equip"></div>
-    <h2>強化 <span style="font-size:12px;color:#667;font-weight:400">— コインで買う</span></h2>
+    <h2>強化 <span style="font-size:12px;color:#667;font-weight:400">— ポイントで買う永続強化（出撃をくり返すほど強くなる）</span></h2>
     <div class="grid" id="shop"></div>
     <details><summary>遊び方</summary>
       <ol style="padding-left:20px;margin:4px 0">
@@ -78,7 +78,7 @@ summary{font-weight:700;cursor:pointer}
         <li>🟠トランポリンで玉の行き先を変えよう。ドラッグで移動、クリックで向きが変わる。戦闘中も動かせる。</li>
         <li>茶色の壁は玉をぶつけると壊れる（玉は減る）。壁の下には大きいゲートが隠れている。</li>
         <li>一番下に落ちた玉は左の管で上に吸い上げられ、城の大砲から敵へ自動で撃ち出される。</li>
-        <li>敵が城にたどり着くと城がダメージ。全部の敵を倒せばクリア。余った玉はコインになる。</li>
+        <li>敵が城にたどり着くと城がダメージ。全部の敵を倒すと次のステージへ。ステージは負けるまで無限に続く。</li>
         <li>敵はたまに📦ドロップ品を落とす（ボスは必ず）。玉・発射台・追加装備があって、それぞれ性能が違う。拠点で付け替えよう。</li>
       </ol>
     </details>
@@ -91,7 +91,8 @@ summary{font-weight:700;cursor:pointer}
       <p id="rText"></p>
       <p style="font-size:24px;font-weight:700">🪙 +<span id="rCoins">0</span></p>
       <div id="rDrops"></div>
-      <button class="go" id="rBtn">拠点へ戻る</button>
+      <p id="rTotal" style="font-size:14px;color:#475569"></p>
+      <div class="row"><button class="sub hidden" id="rQuit">撤退する</button><button class="go" id="rBtn">拠点へ戻る</button></div>
     </div>
   </div>
 </div></div>
@@ -123,7 +124,7 @@ const ITEMS={
   ball_ice:{slot:'ball',ic:'🧊',name:'氷の玉',rare:1,desc:'当たった敵の足が2秒遅くなる'},
   ball_bouncy:{slot:'ball',ic:'🟣',name:'スーパーボール',rare:1,desc:'よく跳ねる・壁へのダメージ×2'},
   ball_fire:{slot:'ball',ic:'🔥',name:'炎の玉',rare:2,desc:'当たると周りの敵にも50%ダメージ'},
-  ball_gold:{slot:'ball',ic:'🟡',name:'金の玉',rare:2,desc:'余った玉のコイン×2・ダメージ×0.7'},
+  ball_gold:{slot:'ball',ic:'🟡',name:'金の玉',rare:2,desc:'余った玉のポイント×2・ダメージ×0.7'},
   ball_thunder:{slot:'ball',ic:'⚡',name:'雷の玉',rare:3,desc:'近くの敵2体に電撃が連鎖（60%）'},
   la_normal:{slot:'launcher',ic:'🔻',name:'ふつうの発射台',rare:0,desc:'特徴なし'},
   la_twin:{slot:'launcher',ic:'⏬',name:'2連発射台',rare:1,desc:'穴が2つ・補給×1.2'},
@@ -136,7 +137,7 @@ const ITEMS={
   ac_hammer:{slot:'acc',ic:'🔨',name:'破壊ハンマー',rare:1,desc:'壁へのダメージ×3'},
   ac_booster:{slot:'acc',ic:'🚀',name:'管ブースター',rare:2,desc:'管が2倍速・連射+30%'},
   ac_spring:{slot:'acc',ic:'🌀',name:'強力バネ',rare:2,desc:'トランポリン幅+30%・跳ね+20%'},
-  ac_gem:{slot:'acc',ic:'💎',name:'宝石',rare:2,desc:'コイン+50%'},
+  ac_gem:{slot:'acc',ic:'💎',name:'宝石',rare:2,desc:'ポイント+50%'},
   ac_gate:{slot:'acc',ic:'✨',name:'ゲート強化石',rare:3,desc:'×2ゲートが全部×3になる'},
 };
 const SLOT_NAME={ball:'玉',launcher:'発射台',acc:'追加装備（2つまで）'};
@@ -176,7 +177,7 @@ const SHOP=[
   {id:'tramp',ic:'🟠',name:'トランポリン',base:120,grow:2.6,max:4,desc:l=>`置ける数 ${2+l} → ${3+l}個`},
   {id:'twide',ic:'↔️',name:'トランポリンの幅',base:50,grow:1.8,max:6,desc:l=>`幅 ${100+15*l}% → ${115+15*l}%`},
   {id:'gate',ic:'🟩',name:'持ち込みゲート ×2',base:300,grow:3,max:3,desc:l=>`自由に動かせる×2ゲート ${l} → ${l+1}個`},
-  {id:'coin',ic:'💰',name:'金運',base:60,grow:1.8,max:10,desc:l=>`余った玉のコイン +${25*l}% → +${25*l+25}%`},
+  {id:'coin',ic:'💰',name:'金運',base:60,grow:1.8,max:10,desc:l=>`余った玉のポイント +${25*l}% → +${25*l+25}%`},
   {id:'pierce',ic:'💥',name:'貫通',base:100,grow:2,max:5,desc:l=>`壁に当たっても玉が残る確率 ${10*l}% → ${10*l+10}%`},
 ];
 const cost=it=>Math.round(it.base*Math.pow(it.grow,lv(it.id)));
@@ -263,13 +264,22 @@ const ballDmg=()=>st.atk*st.dmgMul;
 function trampEnds(t){const a=ANG[t.ai],h=st.tlen/2,c=Math.cos(a)*h,s=Math.sin(a)*h;return{ax:t.x-c,ay:t.y-s,bx:t.x+c,by:t.y+s}}
 function setGateRect(g){g.x1=g.x-g.w/2;g.x2=g.x+g.w/2}
 
+// 1回の出撃（ラン）は1面から始まり、負けるか撤退するまで無限に続く。
+// 稼いだポイントはすぐ保存され、拠点で永続強化に使う
+let runStage=1,runPts=0;
+function newRun(){
+  st=stats();
+  runStage=1;runPts=0;
+  castle={hp:st.castle,max:st.castle,shake:0};
+  startPlan();
+}
 function startPlan(){
   st=stats();
-  M=genStage(save.stage);
+  M=genStage(runStage);
   tramps=[];
   for(let i=0;i<st.tramp;i++)tramps.push({x:MX0+140+((i*0.37)%1)*(W-MX0-280),y:i%2?470:365,ai:i%2?4:1,flash:0});
   for(let i=0;i<st.gates;i++){const g={x:200+i*250,y:275,w:90,k:2,movable:true};setGateRect(g);M.gates.push(g)}
-  if(lastLayout&&lastLayout.stage===save.stage){
+  if(lastLayout){
     launchX=lastLayout.launchX;
     lastLayout.tramps.forEach((t,i)=>{if(tramps[i])Object.assign(tramps[i],t)});
     const mg=M.gates.filter(g=>g.movable);
@@ -279,42 +289,61 @@ function startPlan(){
   buildGrid(M);
   balls=[];pipe=[];shots=[];enemies=[];popups=[];runDrops=[];zaps=[];
   tank=0;time=0;spawnIdx=0;kills=0;feedT=0;fireT=0;
-  castle={hp:st.castle,max:st.castle,shake:0};
   mode='plan';
   $('base').classList.add('hidden');$('result').classList.add('hidden');$('ui').classList.remove('hidden');
   $('startBtn').classList.remove('hidden');$('backBtn').classList.remove('hidden');
 }
 function startRun(){
-  lastLayout={stage:save.stage,launchX,tramps:tramps.map(t=>({x:t.x,y:t.y,ai:t.ai})),
+  lastLayout={launchX,tramps:tramps.map(t=>({x:t.x,y:t.y,ai:t.ai})),
     gates:M.gates.filter(g=>g.movable).map(g=>({x:g.x,y:g.y}))};
   mode='run';
   $('startBtn').classList.add('hidden');$('backBtn').classList.add('hidden');
 }
 function finishRun(win){
   mode='result';
-  let coins;
+  let pts;
   if(win){
     let left=tank;for(const b of balls)left+=b.n;for(const p of pipe)left+=p.n;
-    coins=Math.round(left*0.15*st.coinMul*st.ballCoin)+kills+5*save.stage;
-    $('rTitle').textContent=M.boss?'ボス撃破！':'ステージクリア！';
-    $('rText').textContent=`倒した敵 ${kills}体・余った玉 ${fmt(left)}個`;
-    save.stage++;save.best=Math.max(save.best,save.stage);
+    pts=Math.round(left*0.15*st.coinMul*st.ballCoin)+kills+5*runStage;
+    const heal=Math.ceil(castle.max*0.3),before=castle.hp;
+    castle.hp=Math.min(castle.max,castle.hp+heal);
+    $('rTitle').textContent=(M.boss?'ボス撃破！':'ステージ '+runStage+' クリア！');
+    $('rText').innerHTML=`倒した敵 ${kills}体・余った玉 ${fmt(left)}個`+(castle.hp>before?`<br>🏰 城が ${castle.hp-before} 回復（${castle.hp}/${castle.max}）`:'');
   }else{
-    coins=kills+Math.round(tank*0.2);
+    pts=kills+Math.round(tank*0.2);
     $('rTitle').textContent='城が落ちた…';
-    $('rText').textContent=`倒した敵 ${kills}体。装備を整えて再挑戦！`;
   }
-  // ドロップ品は負けても持ち帰れる。持っている物が出たらコインに換える
+  // ドロップ品はその場で持ち物に入る（次の出撃から付けられる）。持っている物が出たらポイントに換える
   const lines=[];
   for(const id of runDrops){
     const it=ITEMS[id];
-    if(save.inv.includes(id)){const c=20*it.rare+5*save.stage;coins+=c;lines.push(`${it.ic} ${it.name}（2つ目なので 🪙${c} に）`)}
+    if(save.inv.includes(id)){const c=20*it.rare+5*runStage;pts+=c;lines.push(`${it.ic} ${it.name}（2つ目なので 🪙${c} に）`)}
     else{save.inv.push(id);lines.push(`<b class="r${it.rare}">${it.ic} ${it.name} ${stars(it.rare)}</b> NEW!`)}
   }
   $('rDrops').innerHTML=lines.length?'📦 ドロップ品<br>'+lines.join('<br>'):'';
-  save.coins+=coins;persist();
-  $('rCoins').textContent=fmt(coins);
+  runPts+=pts;save.coins+=pts;
+  save.best=Math.max(save.best,win?runStage+1:runStage);
+  persist();
+  $('rCoins').textContent=fmt(pts);
+  if(win){
+    $('rTotal').textContent=`今回の出撃で 🪙${fmt(runPts)}`;
+    $('rBtn').textContent='次のステージへ';$('rQuit').classList.remove('hidden');
+    runStage++;
+  }else showRunEnd();
   $('result').classList.remove('hidden');$('ui').classList.add('hidden');
+}
+function showRunEnd(){
+  mode='result';
+  $('rTitle').textContent=castle.hp<=0?'城が落ちた…':'撤退';
+  $('rText').innerHTML=`ステージ <b>${runStage}</b> まで到達（最高 ${save.best}面）`;
+  $('rTotal').innerHTML=`今回の出撃の合計 <b>🪙${fmt(runPts)}</b><br>拠点でポイントを使って永続強化しよう`;
+  $('rBtn').textContent='拠点へ戻る';$('rQuit').classList.add('hidden');
+  $('result').classList.remove('hidden');$('ui').classList.add('hidden');
+}
+function retreat(){
+  if(!confirm('撤退しますか？ここまでのポイントは持ち帰れます'))return;
+  $('rCoins').textContent='0';$('rDrops').innerHTML='';
+  showRunEnd();
 }
 function showBase(){
   mode='base';
@@ -322,10 +351,9 @@ function showBase(){
   renderBase();
 }
 function renderBase(){
-  $('bCoins').textContent=fmt(save.coins);$('bStage').textContent=save.stage;
-  $('goBtn').textContent=`ステージ ${save.stage} へ出撃`;
-  const m=genStage(save.stage);
-  $('enemyInfo').textContent=`${m.boss?'👑 ボス面（ボスは必ずドロップ）　':''}敵 ${m.spawns.length}体・1体のHP ${fmt(enemyHp(save.stage))}　（最高到達 ${save.best}面）`;
+  $('bCoins').textContent=fmt(save.coins);$('bStage').textContent=save.best;
+  $('goBtn').textContent='出撃（ステージ1から）';
+  $('enemyInfo').textContent='ステージは負けるまで無限に続く。5面ごとにボス（必ずドロップ）。クリアするたび城が30%回復';
   renderEquip();
   const sh=$('shop');sh.innerHTML='';
   for(const it of SHOP){
@@ -706,12 +734,13 @@ function endDrag(){
 cv.addEventListener('pointerup',endDrag);
 cv.addEventListener('pointercancel',()=>{drag=null});
 
-$('goBtn').onclick=startPlan;
+$('goBtn').onclick=newRun;
 $('startBtn').onclick=startRun;
-$('backBtn').onclick=showBase;
-$('rBtn').onclick=showBase;
+$('backBtn').onclick=retreat;
+$('rBtn').onclick=()=>{if($('rQuit').classList.contains('hidden'))showBase();else startPlan()};
+$('rQuit').onclick=()=>{$('rCoins').textContent='0';$('rDrops').innerHTML='';showRunEnd()};
 $('spdBtn').onclick=()=>{speed=speed===1?2:speed===2?3:1;$('spdBtn').textContent='速さ ×'+speed};
-$('resetBtn').onclick=()=>{if(confirm('コイン・装備・ステージを全部消して最初からにしますか？')){save=freshSave();persist();lastLayout=null;renderBase()}};
+$('resetBtn').onclick=()=>{if(confirm('ポイント・強化・ドロップ品を全部消して最初からにしますか？')){save=freshSave();persist();lastLayout=null;renderBase()}};
 window.addEventListener('keydown',e=>{if(e.code==='Space'&&mode==='plan'){e.preventDefault();startRun()}});
 
 window.addEventListener('resize',resize);
